@@ -168,6 +168,32 @@ async def list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="get_merge_request_discussions",
+            description="Get all discussion threads in a merge request",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "The ID of the project"},
+                    "mr_iid": {"type": "integer", "description": "The internal ID of the merge request"}
+                },
+                "required": ["project_id", "mr_iid"]
+            }
+        ),
+        types.Tool(
+            name="reply_to_merge_request_discussion",
+            description="Reply to an existing discussion thread in a merge request",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "The ID of the project"},
+                    "mr_iid": {"type": "integer", "description": "The internal ID of the merge request"},
+                    "discussion_id": {"type": "string", "description": "The ID of the discussion thread to reply to"},
+                    "body": {"type": "string", "description": "The content of the reply"}
+                },
+                "required": ["project_id", "mr_iid", "discussion_id", "body"]
+            }
+        ),
+        types.Tool(
             name="create_merge_request_discussion",
             description="Create a discussion (review comment) on a specific line of code in a merge request",
             inputSchema={
@@ -331,6 +357,32 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             mr = project.mergerequests.get(arguments["mr_iid"])
             note = mr.notes.create({'body': body})
             return [types.TextContent(type="text", text=f"Created note with ID {note.id} on merge request {mr.iid}")]
+
+        elif name == "get_merge_request_discussions":
+            mr = project.mergerequests.get(arguments["mr_iid"])
+            discussions = mr.discussions.list(get_all=True)
+            parts = []
+            for d in discussions:
+                notes = d.attributes.get("notes", [])
+                first = notes[0] if notes else {}
+                position = first.get("position", {})
+                location = ""
+                if position.get("new_path"):
+                    line = position.get("new_line") or position.get("old_line", "?")
+                    location = f" [{position['new_path']}:{line}]"
+                header = f"Discussion {d.id}{location} ({len(notes)} note{'s' if len(notes) != 1 else ''})"
+                note_lines = []
+                for n in notes:
+                    note_lines.append(f"  [{n['id']}] {n['author']['username']}: {n['body']}")
+                parts.append(header + "\n" + "\n".join(note_lines))
+            result = "\n\n".join(parts) if parts else "No discussions found"
+            return [types.TextContent(type="text", text=result)]
+
+        elif name == "reply_to_merge_request_discussion":
+            mr = project.mergerequests.get(arguments["mr_iid"])
+            discussion = mr.discussions.get(arguments["discussion_id"])
+            note = discussion.notes.create({"body": arguments["body"]})
+            return [types.TextContent(type="text", text=f"Replied with note ID {note['id']} to discussion {arguments['discussion_id']} on MR !{mr.iid}")]
 
         elif name == "create_merge_request_discussion":
             mr = project.mergerequests.get(arguments["mr_iid"])
